@@ -2,7 +2,7 @@
 #include <WiFi.h>
 #include <Preferences.h>
 
-#define ledInit 2
+#define espLedBlue 2
 #define optAP2Host 0
 #define optHostOK  1
 #define optHostRST 2
@@ -13,11 +13,16 @@
 const char* ssid     = "ESP32-Dudu";
 const char* password = "123456789";
 static volatile bool wifi_connected = false;
-Preferences preferences; // The NVM storage
-String headerIn;         // Html Header Input
-String htmlSsidList;     // Html selector Wifi list
-String wifiSSID;				 // The SSID use
-String wifiPAWD;         // Accosiate password
+Preferences preferences;     // The NVM storage
+String headerIn;             // Html Header Input
+String htmlSsidList;         // Html selector Wifi list
+String wifiSSID;             // The SSID use
+String wifiPAWD;             // Accosiate password
+int flashLed = 0;            // Led flashing 3 time = IP is correct
+uint32_t previousMillis = 0; // Last milli-second
+uint8_t seconds = 0;         // Seconds [0-59]
+uint8_t minutes = 0;         // Minutes [0-59]
+uint8_t heures  = 0;         // Hours
 
 // Set web server port number to 80
 WiFiServer server(80);
@@ -43,21 +48,12 @@ String urlDecode(const String& text) {
 	return decoded;
 }
 
-void showMacAddress() {
-	byte mac[6];
-	WiFi.macAddress(mac);
-	Serial.print("MAC: ");
-	Serial.print(mac[5],HEX);
-	Serial.print(":");
-	Serial.print(mac[4],HEX);
-	Serial.print(":");
-	Serial.print(mac[3],HEX);
-	Serial.print(":");
-	Serial.print(mac[2],HEX);
-	Serial.print(":");
-	Serial.print(mac[1],HEX);
-	Serial.print(":");
-	Serial.println(mac[0],HEX);
+char* getMacAddress() {
+	static char buffer[25];
+  byte mac[6];
+  WiFi.macAddress(mac);
+	snprintf (buffer, 24, "%X:%X:%X:%X:%X:%X", mac[5],mac[4],mac[3],mac[2],mac[1],mac[0]);
+  return buffer;
 }
 
 void WiFiEvent(WiFiEvent_t event) {
@@ -93,6 +89,7 @@ void WiFiEvent(WiFiEvent_t event) {
       break;
 	  case SYSTEM_EVENT_STA_GOT_IP:
 	  	if (DBX_EVT) Serial.println(">> SYSTEM_EVENT_STA_GOT_IP");
+			flashLed = 3;
       break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
       if (DBX_EVT) Serial.println(">> SYSTEM_EVENT_STA_DISCONNECTED");
@@ -216,7 +213,7 @@ void connectToHost() {
 	preferences.putString("ssid", wifiSSID);
 	preferences.putString("password", wifiPAWD);
 	preferences.end();
-	digitalWrite(ledInit, LOW);
+	digitalWrite(espLedBlue, LOW);
 	Serial.println("");
 	Serial.print("WiFi connected to [Host][IP]:[");Serial.print(wifiSSID);
 	Serial.print("][]");Serial.print(WiFi.localIP());Serial.println("]");
@@ -291,9 +288,12 @@ void loopWifi() {
 void setup() {
   delay(500);
   Serial.begin(115200);
+//	byte new_mac[8] = {0x45,0xCD,0x43,0x37,0x29,0x8C};
+//	esp_base_mac_addr_set(new_mac);
+	previousMillis = millis();
   WiFi.onEvent(WiFiEvent);
-  pinMode(ledInit, OUTPUT);
-  digitalWrite(ledInit, HIGH);
+  pinMode(espLedBlue, OUTPUT);
+  digitalWrite(espLedBlue, HIGH);
 	// Get ssid pwd into flash ram
   preferences.begin("wifi", false);
   wifiSSID =  preferences.getString("ssid", "none");       // NVS key ssid
@@ -303,11 +303,32 @@ void setup() {
 	  connectToHost();  // Try to connect to wifiSSID in NVM stored
   if (wifi_connected==false)
     setAccessPoint(); // Start accesPoint because wifiSSID host is not availabale
-
-		showMacAddress();
+  // Show mac address
+	Serial.print("MAC: ");Serial.println(getMacAddress());
 }
 
 void loop() {
   loopWifi();
-  delay(50);
+
+	// Main loop every new second elapes
+	if ( millis() - previousMillis > 1000L) {
+		previousMillis = millis();
+    // Flash LED
+		if (flashLed > 0) {
+			if ( (seconds & 0x1) == 0 ) {
+				digitalWrite(espLedBlue, HIGH);
+			} 	else {
+				digitalWrite(espLedBlue, LOW);
+				flashLed--;
+			}
+		}
+		// Timer incrementation
+    if (seconds++ == 59) {
+      seconds = 0;
+      if (minutes++ == 59) {
+        minutes = 0;
+        heures++;
+      }
+    }
+	}
 }
