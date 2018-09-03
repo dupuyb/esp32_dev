@@ -288,8 +288,8 @@ void loopWifi() {
 void setup() {
   delay(500);
   Serial.begin(115200);
-//	byte new_mac[8] = {0x45,0xCD,0x43,0x37,0x29,0x8C};
-//	esp_base_mac_addr_set(new_mac);
+	byte new_mac[8] = {0x46,0xCD,0x43,0x37,0x29,0x8C};
+	esp_base_mac_addr_set(new_mac);
 	previousMillis = millis();
   WiFi.onEvent(WiFiEvent);
   pinMode(espLedBlue, OUTPUT);
