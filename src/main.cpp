@@ -1,15 +1,19 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include "esp_wifi.h"
 #include <Preferences.h>
 
-#define espLedBlue 2
+#define EspLedBlue 2
+#define ButtonBoot 0
+
 #define optAP2Host 0
 #define optHostOK  1
 #define optHostRST 2
 
-#define DBX_EVT true
+#define DBX_EVT false
 
 // Access point Initialize
+const char* ipAP     = "192.168.4.1";
 const char* ssid     = "ESP32-Dudu";
 const char* password = "123456789";
 static volatile bool wifi_connected = false;
@@ -23,6 +27,8 @@ uint32_t previousMillis = 0; // Last milli-second
 uint8_t seconds = 0;         // Seconds [0-59]
 uint8_t minutes = 0;         // Minutes [0-59]
 uint8_t heures  = 0;         // Hours
+uint8_t closeAPinSec = 0;    // Close AP
+uint8_t incBtBoot = 0;       // ButtonBoot pressed during time in seconds
 
 // Set web server port number to 80
 WiFiServer server(80);
@@ -48,12 +54,13 @@ String urlDecode(const String& text) {
 	return decoded;
 }
 
-char* getMacAddress() {
-	static char buffer[25];
-  byte mac[6];
-  WiFi.macAddress(mac);
-	snprintf (buffer, 24, "%X:%X:%X:%X:%X:%X", mac[5],mac[4],mac[3],mac[2],mac[1],mac[0]);
-  return buffer;
+String getMacAddress() {
+	//static char buffer[25];
+  //byte mac[6];
+  //WiFi.macAddress(mac);
+	//snprintf (buffer, 24, "%X:%X:%X:%X:%X:%X", mac[5],mac[4],mac[3],mac[2],mac[1],mac[0]);
+	return String(WiFi.macAddress().c_str());
+  //return buffer;
 }
 
 void WiFiEvent(WiFiEvent_t event) {
@@ -112,8 +119,7 @@ void wifiList () {
         htmlSsidList = "no networks found";
     } else {
         htmlSsidList = "<select name=\"wifi\">";
-        for (unsigned int i = 0; i < n; ++i) {
-            // Store SSID for each network found
+        for (unsigned int i = 0; i < n; ++i) { // Store SSID for each network found
             htmlSsidList = htmlSsidList + "<option value=\""+WiFi.SSID(i)+"\">";
             htmlSsidList = htmlSsidList + (i+1) + ": " + WiFi.SSID(i) + "</option>";
         }
@@ -121,12 +127,13 @@ void wifiList () {
     }
 }
 
-void  setAccessPoint() { // Connect to Wi-Fi network with SSID and password
-	wifiList(); // Read list of SSID
+void  setAccessPoint() {       // Connect to Wi-Fi network with SSID and password
+	digitalWrite(EspLedBlue, HIGH);
+	wifiList();                  // Read list of SSID
   WiFi.softAP(ssid, password); // Remove the password parameter, if you want the AP (Access Point) to be open
   IPAddress IP = WiFi.softAPIP();
-  Serial.print("Select WiFi AP (Access Point): "); Serial.print(ssid);
-  Serial.print(" and open your browser on: ");
+  Serial.print("Select WiFi Access Point: '"); Serial.print(ssid);
+  Serial.print("' and open your browser on: ");
   Serial.print("http://");  Serial.println(IP);
   server.begin();
 }
@@ -156,16 +163,15 @@ void htmlNotConnected(WiFiClient client){
   client.println("</head> <body><h1>ESP32 Web Server</h1>");
   client.println("<strong>ESP32-Dudu Host Wi-Fi selector :</strong>");
   client.println("<div> <div/>");
-  client.println("<form action=\"#\" method=\"get\">");
+  client.println("<form action='ap' method='get'>");
   client.println("<div>");
-  client.println("<label for\"wifi\">Wi-Fi :</label>");
+  client.println("<label for'wifi'>Wi-Fi :</label>");
   client.println(htmlSsidList); // ADD Wi-Fi list selector
   client.println("</div><div>");
   client.println("<label>Password :</label>");
-  client.println("<input type=\"text\" name=\"password\"/>");
+  client.println("<input type='text' name='password'/>");
   client.println("</div><div>");
-  client.println("<button type=\"submit\">Connect on selected Wi-Fi</button>");
-  //client.println("<input type=\"submit\" value=\"Connect on selected Wi-Fi\"/>");
+  client.println("<button type='submit'>Connect on selected Wi-Fi</button>");
   client.println("</div>");
   client.println("</form></body></html>");
   client.println(); // The HTTP response ends with another blank line
@@ -185,64 +191,82 @@ void htmlConnectedOk(WiFiClient client, int opt){
   }
   client.println("</b></strong></p>");
   client.println(); // The HTTP response ends with another blank line
-  if (opt==optHostOK) {
-    client.println("<br><hr><a href=\"/accpts\"><button class=\"button\">Change WiFi</button></a>");
-  }
-	if (opt==optHostRST || opt==optHostOK) {
+
+	//if (opt==optHostOK) {
+    client.println("<br><hr><a href=\"/reset\"><button class=\"button\">Change WiFi</button></a>");
+  //}
+	//if (opt==optHostRST || opt==optHostOK) {
 		client.println("<br>Select WiFi Access Point: <b>");
 		client.println( ssid);
-		client.println("</b> and open your browser on IP:<b> 192.168.4.1");
-	}
+		client.println("</b> and open your browser on IP:<b> ");
+		client.println(ipAP);
+	//}
+
 	client.println("</body></html>");
+
+	IPAddress IP = WiFi.localIP();
+	Serial.println(">>>> Local IP: "); Serial.print(IP);Serial.println(" ");
+
 	client.stop();
+}
+
+void putPreferences(String ssid, String pwd) {
+	preferences.clear();
+	preferences.begin("wifi", false);
+	preferences.putString("ssid", ssid);
+	preferences.putString("password", pwd);
+	preferences.end();
 }
 
 void connectToHost() {
 	WiFi.disconnect();
 	wifi_connected = false;
+	Serial.print("Try to connect WIFI: '"); Serial.print(wifiSSID);Serial.print("' PWD :"); Serial.println(wifiPAWD);
 	int mxl=0;
 	WiFi.begin(wifiSSID.c_str(), wifiPAWD.c_str());
 	while (WiFi.status() != WL_CONNECTED) {
 		delay(500);
 		Serial.print(".");
-		if (mxl++ > 40) ESP.restart(); // Connection timeout back to AccessPoint
+		if (mxl++ > 40) {
+			Serial.println(".");
+			setAccessPoint(); // Start accesPoint because wifiSSID host is not availabale
+			// ESP.restart(); // Connection timeout back to AccessPoint
+		  return;
+		}
 	}
 	// Store new Wifi ssid and password
-	preferences.clear();
-	preferences.begin("wifi", false); // Note: Namespace name is limited to 15 chars
-	preferences.putString("ssid", wifiSSID);
-	preferences.putString("password", wifiPAWD);
-	preferences.end();
-	digitalWrite(espLedBlue, LOW);
+	putPreferences(wifiSSID, wifiPAWD);
+	// preferences.clear();
+	// preferences.begin("wifi", false); // Note: Namespace name is limited to 15 chars
+	// preferences.putString("ssid", wifiSSID);
+	// preferences.putString("password", wifiPAWD);
+	// preferences.end();
+	digitalWrite(EspLedBlue, LOW);
 	Serial.println("");
 	Serial.print("WiFi connected to [Host][IP]:[");Serial.print(wifiSSID);
 	Serial.print("][]");Serial.print(WiFi.localIP());Serial.println("]");
 	server.begin();
+	closeAPinSec = 3; // 1 == AP stop()
 	wifi_connected = true;
 }
 
-void disconnectedWifi (WiFiClient client) {
-	if (headerIn.indexOf("GET /?wifi=") >= 0) { // wifiSSID is selected Try  connection
+void fromWiFiAP (WiFiClient client) {
+	if (headerIn.indexOf("GET /ap?wifi=") >= 0) { // wifiSSID is selected Try  connection
 		int e = headerIn.indexOf("&password=");
 		int s = headerIn.indexOf(" HTTP/");
-		wifiSSID = urlDecode(headerIn.substring(11, e));
+		wifiSSID = urlDecode(headerIn.substring(13, e));
 		wifiPAWD = urlDecode(headerIn.substring(e+10, s));
-		Serial.print("WIFI:"); Serial.println(wifiSSID);
-		Serial.print("PWD :"); Serial.println(wifiPAWD);
 		htmlConnectedOk(client, optAP2Host);      // Answer connection OK
+		delay(500);
 		connectToHost();                          // Store new Wifi ssid, password and connect
 		return;
 	}
 	htmlNotConnected(client);
 }
 
-void connectedWifi(WiFiClient client) {       // Loop when Esp is connected to Wifi
-	if (headerIn.indexOf("GET /accpts") >= 0) { // Back to AP for wifi selection
-      preferences.clear();
-			preferences.begin("wifi", false);
-			preferences.putString("ssid", "none");
-			preferences.putString("password", "none");
-			preferences.end();
+void fromWiFiSTA(WiFiClient client) {         // Loop when Esp is connected to Wifi
+	if (headerIn.indexOf("GET /reset") >= 0) { // Back to AP for wifi selection
+      putPreferences("none","none");
 			htmlConnectedOk(client, optHostRST);
 			Serial.println("REBOOT SENDING BY HTTP");
 			client.stop();
@@ -263,12 +287,13 @@ void loopWifi() {
         Serial.write(c);                    // print it out the serial monitor
         headerIn += c;
         if (c == '\n') {                    // if the byte is a newline character
+					Serial.print("++ headerIn:");	Serial.println(headerIn);
           if (currentLine.length() == 0) {  // that's the end of the client HTTP request, so send a response:
-					  if (wifi_connected == false)
-						  disconnectedWifi(client);     // AccessPoint html fom for wifi selection
+					if (wifi_connected == false)
+						  fromWiFiAP(client);           // AccessPoint html fom for wifi selection
 					   else
-						  connectedWifi(client);        // Wifi Host selection is OK
-            break;                          // Break out of the while loop
+						  fromWiFiSTA(client);          // Wifi Host selection is OK
+             break;                          // Break out of the while loop
           } else {                          // if you got a newline, then clear currentLine
             currentLine = "";
           }
@@ -277,8 +302,7 @@ void loopWifi() {
         }
       }                                     // end available
     }                                       // end client
-    Serial.print("++headerIn:");
-		Serial.println(headerIn);
+
     headerIn = "";                          // Clear the headerIn variable
     client.stop();                          // Close the connection
     Serial.println("Client disconnected.");
@@ -286,39 +310,63 @@ void loopWifi() {
 }
 
 void setup() {
-  delay(500);
+  delay(5000);
   Serial.begin(115200);
-	byte new_mac[8] = {0x46,0xCD,0x43,0x37,0x29,0x8C};
+//	byte new_mac[8] = {0x30,0xAE,0xA4,0x90,0xFD,0xC8}; // Pif
+  byte new_mac[8] = {0x8C,0x29,0x37,0x43,0xCD,0x46}; // Dudu
 	esp_base_mac_addr_set(new_mac);
 	previousMillis = millis();
+  // event WiFi
   WiFi.onEvent(WiFiEvent);
-  pinMode(espLedBlue, OUTPUT);
-  digitalWrite(espLedBlue, HIGH);
+	// Led
+  pinMode(EspLedBlue, OUTPUT);
 	// Get ssid pwd into flash ram
   preferences.begin("wifi", false);
   wifiSSID =  preferences.getString("ssid", "none");       // NVS key ssid
   wifiPAWD =  preferences.getString("password", "none");   // NVS key password
   preferences.end();
-  if (wifiPAWD.indexOf("none")!=0)
+  // Start AP and / or  STA
+  if (wifiSSID.indexOf("none")!=0) {
 	  connectToHost();  // Try to connect to wifiSSID in NVM stored
-  if (wifi_connected==false)
-    setAccessPoint(); // Start accesPoint because wifiSSID host is not availabale
-  // Show mac address
-	Serial.print("MAC: ");Serial.println(getMacAddress());
+	} else {
+    if (wifi_connected==false)
+      setAccessPoint(); // Start accesPoint because wifiSSID host is not availabale
+  }
+
+	// Mac address
+	Serial.print("Addr macAP : "); Serial.println( WiFi.softAPmacAddress().c_str() ); // Show mac address
+	Serial.print("Addr macSTA: "); Serial.println( WiFi.macAddress().c_str() ); // Show mac address
 }
 
 void loop() {
+	// Main loop from http
   loopWifi();
 
 	// Main loop every new second elapes
 	if ( millis() - previousMillis > 1000L) {
+		int btBoot = digitalRead(ButtonBoot);
+		if (btBoot==LOW) {
+			incBtBoot++;
+			Serial.println("btBoot pressed.");
+			if (incBtBoot>3) {
+				putPreferences("none","none");
+				setAccessPoint();
+			}
+		} else {
+			incBtBoot = 0;
+		}
+
 		previousMillis = millis();
-    // Flash LED
+    // Close AccessPoint
+    if ( closeAPinSec > 0)
+		  closeAPinSec --;
+		if (closeAPinSec==1) WiFi.softAPdisconnect(true);
+		// Flash LED process
 		if (flashLed > 0) {
 			if ( (seconds & 0x1) == 0 ) {
-				digitalWrite(espLedBlue, HIGH);
+				digitalWrite(EspLedBlue, HIGH);
 			} 	else {
-				digitalWrite(espLedBlue, LOW);
+				digitalWrite(EspLedBlue, LOW);
 				flashLed--;
 			}
 		}
