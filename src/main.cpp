@@ -7,7 +7,7 @@
 #define ButtonBoot 0
 
 #define optAP2Host 0
-#define optHostOK  1
+#define optStaOK  1
 #define optHostRST 2
 
 #define DBX_EVT false
@@ -183,31 +183,31 @@ void htmlConnectedOk(WiFiClient client, int opt){
   client.println("<style>html{font-family:Helvetica;display:inline-block;margin: 0px auto;text-align:center;background-color:#eee;}");
   client.println("p {background-color:#4CAF50;border:none;color:white; padding: 16px 40px;} ");
 	client.println(".button {background-color:#e4685d;border:none;color:blue;border-radius:4px;font-family:Arial;font-size:15px;font-weight:bold;padding: 6px 15px;");
-
   client.println("</style></head><body>");
 	if (opt!=optHostRST) {
-	  client.println("<h1>ESP32 Web Server</h1><p><strong>ESP32 is connected at <b>");
+	  client.println("<h1>ESP32 Web Server</h1><p><strong>ESP32 is connected at <b>><br>");
     client.println(wifiSSID);
   }
   client.println("</b></strong></p>");
-  client.println(); // The HTTP response ends with another blank line
-
-	//if (opt==optHostOK) {
-    client.println("<br><hr><a href=\"/reset\"><button class=\"button\">Change WiFi</button></a>");
+	if (opt==optStaOK) {
+		client.println("<br>Station is running on IP: <b>");
+		client.println(WiFi.localIP());
+    client.println("</b> to be modified ...");
+	}
+//  client.println(); // The HTTP response ends with another blank line
+	//if (opt==optStaOK) {
+  client.println("<br><hr><a href=\"/reset\"><button class=\"button\">Change WiFi</button></a>");
   //}
-	//if (opt==optHostRST || opt==optHostOK) {
-		client.println("<br>Select WiFi Access Point: <b>");
-		client.println( ssid);
-		client.println("</b> and open your browser on IP:<b> ");
-		client.println(ipAP);
+	//if (opt==optHostRST || opt==optStaOK) {
+	client.println("<br>Select WiFi Access Point: <b>");
+	client.println( ssid);
+	client.println("</b> and open your browser on IP:<b> ");
+	client.println(ipAP);
 	//}
-
 	client.println("</body></html>");
-
-	IPAddress IP = WiFi.localIP();
-	Serial.println(">>>> Local IP: "); Serial.print(IP);Serial.println(" ");
-
-	client.stop();
+//	IPAddress IP = WiFi.localIP();
+//	Serial.println(">>>> Local IP: "); Serial.print(IP);Serial.println(" ");
+//	client.stop();
 }
 
 void putPreferences(String ssid, String pwd) {
@@ -230,17 +230,11 @@ void connectToHost() {
 		if (mxl++ > 40) {
 			Serial.println(".");
 			setAccessPoint(); // Start accesPoint because wifiSSID host is not availabale
-			// ESP.restart(); // Connection timeout back to AccessPoint
 		  return;
 		}
 	}
 	// Store new Wifi ssid and password
 	putPreferences(wifiSSID, wifiPAWD);
-	// preferences.clear();
-	// preferences.begin("wifi", false); // Note: Namespace name is limited to 15 chars
-	// preferences.putString("ssid", wifiSSID);
-	// preferences.putString("password", wifiPAWD);
-	// preferences.end();
 	digitalWrite(EspLedBlue, LOW);
 	Serial.println("");
 	Serial.print("WiFi connected to [Host][IP]:[");Serial.print(wifiSSID);
@@ -259,61 +253,59 @@ void fromWiFiAP (WiFiClient client) {
 		htmlConnectedOk(client, optAP2Host);      // Answer connection OK
 		delay(500);
 		connectToHost();                          // Store new Wifi ssid, password and connect
-		return;
+	} else {
+		htmlNotConnected(client);
 	}
-	htmlNotConnected(client);
 }
 
 void fromWiFiSTA(WiFiClient client) {         // Loop when Esp is connected to Wifi
-	if (headerIn.indexOf("GET /reset") >= 0) { // Back to AP for wifi selection
+	if (headerIn.indexOf("GET /reset") >= 0) {  // Back to AP for wifi selection
       putPreferences("none","none");
 			htmlConnectedOk(client, optHostRST);
 			Serial.println("REBOOT SENDING BY HTTP");
 			client.stop();
 			delay(500);
 			ESP.restart();
+	} else {
+		htmlConnectedOk(client, optStaOK);
 	}
-  htmlConnectedOk(client, optHostOK);
 }
 
 void loopWifi() {
   WiFiClient client = server.available();   // listen for incoming clients
   if (client) {                             // if you get a client,
-    Serial.println("New client");           // print a message out the serial port
-    String currentLine = "";                // make a String to hold incoming data from the client
-    while (client.connected()) {            // loop while the client's connected
-      if (client.available()) {             // if there's bytes to read from the client,
-        char c = client.read();             // read a byte, then
-        Serial.write(c);                    // print it out the serial monitor
-        headerIn += c;
-        if (c == '\n') {                    // if the byte is a newline character
-					Serial.print("++ headerIn:");	Serial.println(headerIn);
-          if (currentLine.length() == 0) {  // that's the end of the client HTTP request, so send a response:
-					if (wifi_connected == false)
-						  fromWiFiAP(client);           // AccessPoint html fom for wifi selection
-					   else
-						  fromWiFiSTA(client);          // Wifi Host selection is OK
-             break;                          // Break out of the while loop
-          } else {                          // if you got a newline, then clear currentLine
-            currentLine = "";
-          }
-        } else if (c != '\r') {             // if you got anything else but a carriage return character,
-          currentLine += c;                 // add it to the end of the currentLine
-        }
-      }                                     // end available
-    }                                       // end client
-
-    headerIn = "";                          // Clear the headerIn variable
-    client.stop();                          // Close the connection
-    Serial.println("Client disconnected.");
+		Serial.println("New client");
+		if (client.connected()) {
+	    unsigned long timeout = millis();
+      while ( client.available() == 0 ) {  // wait a correct message
+				 if (millis() - timeout > 5000) {
+					 Serial.println("Timeout client");
+					 client.stop();
+					 return;
+				 }
+			}
+			while ( client.available() > 0 ) {    // if there's bytes to read from the client,
+				char c = client.read();
+				headerIn += c;
+			}
+		  if (headerIn.length() > 0 ) {
+			  Serial.println(headerIn);
+		    if (wifi_connected == false)
+			    fromWiFiAP(client);           // AccessPoint html fom for wifi selection
+		    else
+			    fromWiFiSTA(client);          // Wifi Host selection is OK
+			  headerIn = "";                  // Clear the headerIn variable
+		  }
+	  }
+    Serial.println("End client");
   }
 }
 
 void setup() {
   delay(5000);
   Serial.begin(115200);
-//	byte new_mac[8] = {0x30,0xAE,0xA4,0x90,0xFD,0xC8}; // Pif
-  byte new_mac[8] = {0x8C,0x29,0x37,0x43,0xCD,0x46}; // Dudu
+	byte new_mac[8] = {0x30,0xAE,0xA4,0x90,0xFD,0xC8}; // Pif
+//  byte new_mac[8] = {0x8C,0x29,0x37,0x43,0xCD,0x46}; // Dudu
 	esp_base_mac_addr_set(new_mac);
 	previousMillis = millis();
   // event WiFi
@@ -332,7 +324,6 @@ void setup() {
     if (wifi_connected==false)
       setAccessPoint(); // Start accesPoint because wifiSSID host is not availabale
   }
-
 	// Mac address
 	Serial.print("Addr macAP : "); Serial.println( WiFi.softAPmacAddress().c_str() ); // Show mac address
 	Serial.print("Addr macSTA: "); Serial.println( WiFi.macAddress().c_str() ); // Show mac address
@@ -341,7 +332,6 @@ void setup() {
 void loop() {
 	// Main loop from http
   loopWifi();
-
 	// Main loop every new second elapes
 	if ( millis() - previousMillis > 1000L) {
 		int btBoot = digitalRead(ButtonBoot);
