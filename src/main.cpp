@@ -261,11 +261,11 @@ void connectToHost() {
 }
 
 void fromWiFiAP (WiFiClient client) {
-	if (headerIn.indexOf("GET /ap?wifi=") >= 0) { // wifiSSID is selected Try  connection
+	if (headerIn.indexOf("POST /ap HTTP/") >= 0) { // wifiSSID is selected Try  connection
+		int sw = headerIn.indexOf("wifi=");
 		int e = headerIn.indexOf("&password=");
-		int s = headerIn.indexOf(" HTTP/");
-		wifiSSID = urlDecode(headerIn.substring(13, e));
-		wifiPAWD = urlDecode(headerIn.substring(e+10, s));
+		wifiSSID = urlDecode(headerIn.substring(sw+5, e));
+		wifiPAWD = urlDecode(headerIn.substring(e+10));
 		htmlConnectedOk(client, optAP2Host);      // Answer connection OK
 		delay(1000);
 		connectToHost();                          // Store new Wifi ssid, password and connect
