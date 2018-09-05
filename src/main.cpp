@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
-#include "esp_wifi.h"
 #include <Preferences.h>
+#include <time.h>
 
 #define EspLedBlue 2
 #define ButtonBoot 0
@@ -13,9 +13,14 @@
 #define DBX_EVT false
 
 // Access point Initialize
-const char* ipAP     = "192.168.4.1";
-const char* ssid     = "ESP32-Dudu";
-const char* password = "123456789";
+// IPAddress Ip(192, 168, 1, 4);
+// IPAddress NMask(255, 255, 255, 0);
+const char* ipAP                    = "192.168.4.1";
+const char* ssid                    = "ESP32-Dudu";
+const char* password                = "123456789";
+const char* ntpServer               = "pool.ntp.org";
+const long  gmtOffset_sec           = 3600;
+const int   daylightOffset_sec      = 3600;
 static volatile bool wifi_connected = false;
 Preferences preferences;     // The NVM storage
 String headerIn;             // Html Header Input
@@ -25,13 +30,14 @@ String wifiPAWD;             // Accosiate password
 int flashLed = 0;            // Led flashing 3 time = IP is correct
 uint32_t previousMillis = 0; // Last milli-second
 uint8_t seconds = 0;         // Seconds [0-59]
-uint8_t minutes = 0;         // Minutes [0-59]
-uint8_t heures  = 0;         // Hours
 uint8_t closeAPinSec = 0;    // Close AP
 uint8_t incBtBoot = 0;       // ButtonBoot pressed during time in seconds
 
 // Set web server port number to 80
 WiFiServer server(80);
+
+// time
+struct tm timeinfo;
 
 String urlDecode(const String& text) {
 	String decoded = "";
@@ -55,12 +61,20 @@ String urlDecode(const String& text) {
 }
 
 String getMacAddress() {
-	//static char buffer[25];
-  //byte mac[6];
-  //WiFi.macAddress(mac);
-	//snprintf (buffer, 24, "%X:%X:%X:%X:%X:%X", mac[5],mac[4],mac[3],mac[2],mac[1],mac[0]);
 	return String(WiFi.macAddress().c_str());
-  //return buffer;
+}
+
+String getTime() {
+	char temp[10];
+	sprintf(temp, "%02d:%02d:%02d", timeinfo.tm_hour,timeinfo.tm_min,timeinfo.tm_sec );
+	return String(temp);
+}
+
+String getDate(){
+	char temp[20];
+	sprintf(temp, "%02d/%02d/%04d %02d:%02d:%02d",
+	   timeinfo.tm_mday, (timeinfo.tm_mon+1), (1900+timeinfo.tm_year),  timeinfo.tm_hour,timeinfo.tm_min,timeinfo.tm_sec );
+	return String(temp);
 }
 
 void WiFiEvent(WiFiEvent_t event) {
@@ -96,7 +110,10 @@ void WiFiEvent(WiFiEvent_t event) {
       break;
 	  case SYSTEM_EVENT_STA_GOT_IP:
 	  	if (DBX_EVT) Serial.println(">> SYSTEM_EVENT_STA_GOT_IP");
-			flashLed = 3;
+			{
+			 flashLed = 3; // 3 flash indicat that we have an IP
+	     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer); //init and get the time
+		  }
       break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
       if (DBX_EVT) Serial.println(">> SYSTEM_EVENT_STA_DISCONNECTED");
@@ -128,9 +145,12 @@ void wifiList () {
 }
 
 void  setAccessPoint() {       // Connect to Wi-Fi network with SSID and password
+	Serial.println();
 	digitalWrite(EspLedBlue, HIGH);
 	wifiList();                  // Read list of SSID
   WiFi.softAP(ssid, password); // Remove the password parameter, if you want the AP (Access Point) to be open
+	delay (100 );
+  // WiFi.softAPConfig(Ip, Ip, NMask);
   IPAddress IP = WiFi.softAPIP();
   Serial.print("Select WiFi Access Point: '"); Serial.print(ssid);
   Serial.print("' and open your browser on: ");
@@ -138,7 +158,7 @@ void  setAccessPoint() {       // Connect to Wi-Fi network with SSID and passwor
   server.begin();
 }
 
-void htmlHeader(WiFiClient client){
+void htmlHeader(WiFiClient client) {
   client.println("HTTP/1.1 200 OK");
   client.println("Content-type:text/html");
   client.println("Connection: close");
@@ -148,7 +168,7 @@ void htmlHeader(WiFiClient client){
   client.println("<link rel=\"icon\" href=\"data:,\">");
 }
 
-void htmlNotConnected(WiFiClient client){
+void htmlNotConnected(WiFiClient client) {
   // Display the HTML web page
   htmlHeader(client);
   client.println("<style>");
@@ -163,7 +183,7 @@ void htmlNotConnected(WiFiClient client){
   client.println("</head> <body><h1>ESP32 Web Server</h1>");
   client.println("<strong>ESP32-Dudu Host Wi-Fi selector :</strong>");
   client.println("<div> <div/>");
-  client.println("<form action='ap' method='get'>");
+  client.println("<form action='ap' method='post'>");
   client.println("<div>");
   client.println("<label for'wifi'>Wi-Fi :</label>");
   client.println(htmlSsidList); // ADD Wi-Fi list selector
@@ -178,28 +198,28 @@ void htmlNotConnected(WiFiClient client){
   Serial.println("End htmlNotConnected HTML");
 }
 
-void htmlConnectedOk(WiFiClient client, int opt){
+void htmlConnectedOk(WiFiClient client, int opt) {
   htmlHeader(client);
   client.println("<style>html{font-family:Helvetica;display:inline-block;margin: 0px auto;text-align:center;background-color:#eee;}");
   client.println("p {background-color:#4CAF50;border:none;color:white; padding: 16px 40px;} ");
 	client.println(".button {background-color:#e4685d;border:none;color:blue;border-radius:4px;font-family:Arial;font-size:15px;font-weight:bold;padding: 6px 15px;");
   client.println("</style></head><body>");
 	if (opt!=optHostRST) {
-	  client.println("<h1>ESP32 Web Server</h1><p><strong>ESP32 is connected at <b>><br>");
+	  client.println("<h1>ESP32 Web Server</h1><p><strong>ESP32 is connected at <b><br>");
     client.println(wifiSSID);
   }
   client.println("</b></strong></p>");
 	if (opt==optStaOK) {
 		client.println("<br>Station is running on IP: <b>");
 		client.println(WiFi.localIP());
-    client.println("</b> to be modified ...");
+    client.println("</b> NTP Time:"); client.println(getDate());
 	}
 //  client.println(); // The HTTP response ends with another blank line
 	//if (opt==optStaOK) {
   client.println("<br><hr><a href=\"/reset\"><button class=\"button\">Change WiFi</button></a>");
   //}
 	//if (opt==optHostRST || opt==optStaOK) {
-	client.println("<br>Select WiFi Access Point: <b>");
+	client.println("<br><hr>Select WiFi Access Point: <b>");
 	client.println( ssid);
 	client.println("</b> and open your browser on IP:<b> ");
 	client.println(ipAP);
@@ -251,7 +271,7 @@ void fromWiFiAP (WiFiClient client) {
 		wifiSSID = urlDecode(headerIn.substring(13, e));
 		wifiPAWD = urlDecode(headerIn.substring(e+10, s));
 		htmlConnectedOk(client, optAP2Host);      // Answer connection OK
-		delay(500);
+		delay(1000);
 		connectToHost();                          // Store new Wifi ssid, password and connect
 	} else {
 		htmlNotConnected(client);
@@ -307,6 +327,7 @@ void setup() {
 	byte new_mac[8] = {0x30,0xAE,0xA4,0x90,0xFD,0xC8}; // Pif
 //  byte new_mac[8] = {0x8C,0x29,0x37,0x43,0xCD,0x46}; // Dudu
 	esp_base_mac_addr_set(new_mac);
+	// Ethernet.begin(new_mac);
 	previousMillis = millis();
   // event WiFi
   WiFi.onEvent(WiFiEvent);
@@ -334,6 +355,13 @@ void loop() {
   loopWifi();
 	// Main loop every new second elapes
 	if ( millis() - previousMillis > 1000L) {
+    // Time only when connected
+		if (wifi_connected) {
+		  if (!getLocalTime(&timeinfo))
+			  	Serial.println("Failed to obtain time");
+		  Serial.print("\r");Serial.print(getDate());
+    }
+		// Button Reset pressed more than 3 sec.
 		int btBoot = digitalRead(ButtonBoot);
 		if (btBoot==LOW) {
 			incBtBoot++;
@@ -345,9 +373,9 @@ void loop() {
 		} else {
 			incBtBoot = 0;
 		}
-
+    // Get time
 		previousMillis = millis();
-    // Close AccessPoint
+    // Close AccessPoint if necessary
     if ( closeAPinSec > 0)
 		  closeAPinSec --;
 		if (closeAPinSec==1) WiFi.softAPdisconnect(true);
@@ -363,10 +391,6 @@ void loop() {
 		// Timer incrementation
     if (seconds++ == 59) {
       seconds = 0;
-      if (minutes++ == 59) {
-        minutes = 0;
-        heures++;
-      }
     }
 	}
 }
