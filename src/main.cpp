@@ -3,18 +3,17 @@
 #include <Preferences.h>
 #include <time.h>
 
-/*
- Embedded LED facilities
- Continus = AccessPoint waitting a wifi host selection
- blinking = Wait Station connection is OK
- */
+// Embedded LED facilities
+// Continus = AccessPoint waitting a wifi host selection
+// blinking = Wait Station connection is OK
+// off      = Station is connected to ssid
 #define EspLedBlue 2
-/*
- Button BOOT on ESP32 is pressed more than 3 seconds
- reset all wifi_host selection
- */
+
+// Button BOOT on ESP32 is pressed more than 3 seconds
+// reset all wifi_host selection
 #define ButtonBoot 0
 
+// Application mode
 #define optAP2Host 0
 #define optStaOK   1
 #define optHostRST 2
@@ -48,7 +47,7 @@ uint8_t seconds = 0;           // Seconds [0-59]
 uint8_t incBtBoot = 0;         // ButtonBoot pressed during time in seconds
 WiFiServer server(80);         // Set web server port number to 80
 struct tm timeinfo;            // time struct
-const char * EVENT_ID[26] = {
+const char * EVENT_ID[26] = {  // https://github.com/espressif/esp-idf/blob/master/components/esp32/include/esp_event.h
   "SYSTEM_EVENT_WIFI_READY",
   "SYSTEM_EVENT_SCAN_DONE",
   "SYSTEM_EVENT_STA_START",
@@ -76,7 +75,6 @@ const char * EVENT_ID[26] = {
   "SYSTEM_EVENT_ETH_GOT_IP",
   "SYSTEM_EVENT_MAX"
 };
-
 const String httpHeaders[7] = {
   "HTTP/1.1 200 OK",
   "Content-type:text/html",
@@ -252,7 +250,7 @@ void htmlConnectedOk(WiFiClient client, int opt) {
   client.println("</form>");
 
   client.println("<br><hr>Select WiFi Access Point: <b>");
-  client.println( ssid);
+  client.println(ssid);
   client.println("</b> and open your browser on IP:<b> ");
   client.println(addressIpAP);
   client.println("</body></html>");
@@ -300,7 +298,7 @@ void connectToHost() {
 
 // loopWifi in case of AP
 void fromWiFiAP (WiFiClient client) {
-  // wifiSSID is selected Try  connection
+  // wifiSSID is selected Try connection
   if (headerIn.indexOf("POST /ap HTTP/") >= 0) {
     int sw = headerIn.indexOf("wifi=");
     int e = headerIn.indexOf("&password=");
@@ -315,7 +313,7 @@ void fromWiFiAP (WiFiClient client) {
   }
 }
 
-// LoopWifi in mode STATION
+// LoopWifi in mode STATION mode
 void fromWiFiSTA(WiFiClient client) {
   int se = headerIn.indexOf("POST /sta HTTP/");
   int sw = headerIn.indexOf("reset=Reset");
@@ -364,7 +362,7 @@ void setup() {
   Serial.begin(115200);
 
   // Wait a little bit for serial connection
-  delay(5000);
+  if (DBX_EVT || DBX_MSG || DBX_WIFI) delay(5000);
 
   // Set MAC addess & AP IP
   byte new_mac[8] = {0x30,0xAE,0xA4,0x90,0xFD,0xC8}; // Pif
@@ -388,12 +386,12 @@ void setup() {
   wifiPAWD =  preferences.getString("password", "none");   // NVS key password
   preferences.end();
 
-  // Start AP and / or  STA
+  // Start AccessPointP or Station mode
   if (DBX_MSG) {Serial.print("NVM ssid=");Serial.println(wifiSSID);}
   if (wifiSSID.indexOf("none")!=0) {
     connectToHost();  // Try to connect to wifiSSID in NVM stored
   } else {
-    if (wifi_stationok==false)
+    if (!wifi_stationok)
       setAccessPoint(); // Start accesPoint because wifiSSID host is not availabale
   }
 
@@ -423,13 +421,13 @@ void loop() {
     if (wifi_stationok) {
 
       // Close Access Point.
-      if ( wifi_accessPts ) {
+      if (wifi_accessPts) {
         if (DBX_MSG) Serial.println("Disconnect Access Point.");
         WiFi.softAPdisconnect(true);
         wifi_accessPts = false;
       }
 
-      // Debug message for test
+      // Debug message for testing
       if (DBX_MSG) {
         if (!getLocalTime(&timeinfo))
           Serial.println("Failed to obtain time");
@@ -445,10 +443,7 @@ void loop() {
       if (DBX_MSG) Serial.println("btBoot pressed.");
       if (incBtBoot>3) {
         putPreferences("none","none");
-        // setAccessPoint();
         rebootASAP = true;
-        //delay(50);
-        //ESP.restart();
       }
     } else {
       incBtBoot = 0;
