@@ -20,7 +20,7 @@
 
 // Debug facilities
 #define DBX_EVT  false
-#define DBX_MSG  false
+#define DBX_MSG  true
 #define DBX_WIFI true
 
 #define MAX_STA_WAIT 40  // One loop take 0.5 sec
