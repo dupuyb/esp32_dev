@@ -270,7 +270,7 @@ void connectToHost() {
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   wifi_stationok = false;
-  if (DBX_WIFI)  { Serial.print("Try to connect WIFI: '"); Serial.print(wifiSSID);Serial.print("' PWD :"); Serial.println("wifiPAWD"); }
+  if (DBX_WIFI)  { Serial.print("Try to connect WIFI: '"); Serial.print(wifiSSID);Serial.print("' PWD :"); Serial.println(wifiPAWD.c_str()); }
   flashLed=0;
   WiFi.begin(wifiSSID.c_str(), wifiPAWD.c_str());
   while (WiFi.status() != WL_CONNECTED) {
